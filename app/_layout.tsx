@@ -2,8 +2,18 @@ import { SplashScreen, Stack } from "expo-router";
 import "@/global.css";
 import { useFonts } from "expo-font";
 import { useEffect } from "react";
+import { ClerkProvider } from "@clerk/expo";
+import { tokenCache } from "@clerk/expo/token-cache";
 
 SplashScreen.preventAutoHideAsync();
+
+const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!;
+
+if (!publishableKey) {
+  throw new Error(
+    "Missing EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY – add it to your .env file"
+  );
+}
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
@@ -12,7 +22,7 @@ export default function RootLayout() {
     "sans-semibold": require("../assets/fonts/PlusJakartaSans-SemiBold.ttf"),
     "sans-bold": require("../assets/fonts/PlusJakartaSans-Bold.ttf"),
     "sans-extrabold": require("../assets/fonts/PlusJakartaSans-ExtraBold.ttf"),
-    "sans-light": require("../assets/fonts/PlusJakartaSans-Light.ttf")
+    "sans-light": require("../assets/fonts/PlusJakartaSans-Light.ttf"),
   });
 
   useEffect(() => {
@@ -25,5 +35,9 @@ export default function RootLayout() {
     return null;
   }
 
-  return <Stack screenOptions={{ headerShown: false }} />;
+  return (
+    <ClerkProvider publishableKey={publishableKey} tokenCache={tokenCache}>
+      <Stack screenOptions={{ headerShown: false }} />
+    </ClerkProvider>
+  );
 }
