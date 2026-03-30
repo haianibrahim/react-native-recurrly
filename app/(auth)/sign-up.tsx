@@ -1,20 +1,20 @@
 import { useSignUp } from "@clerk/expo";
 import { Link, useRouter } from "expo-router";
+import { styled } from "nativewind";
 import { useState } from "react";
 import {
-  ActivityIndicator,
-  Keyboard,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  Text,
-  TextInput,
-  TouchableWithoutFeedback,
-  View,
+    ActivityIndicator,
+    Keyboard,
+    KeyboardAvoidingView,
+    Platform,
+    Pressable,
+    ScrollView,
+    Text,
+    TextInput,
+    TouchableWithoutFeedback,
+    View,
 } from "react-native";
 import { SafeAreaView as RNSafeAreaView } from "react-native-safe-area-context";
-import { styled } from "nativewind";
 
 const SafeAreaView = styled(RNSafeAreaView);
 
@@ -22,10 +22,24 @@ export default function SignUp() {
   const { signUp } = useSignUp();
   const router = useRouter();
 
+  const finalizeAndNavigate = async (su: typeof signUp) => {
+    await su.finalize({
+      navigate: ({ session }) => {
+        const task = session.currentTask?.key;
+        if (task) {
+          router.replace(`/(tabs)`);
+        } else {
+          router.replace("/(tabs)");
+        }
+      },
+    });
+  };
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [pendingVerification, setPendingVerification] = useState(false);
+  const [resending, setResending] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
 
@@ -62,8 +76,7 @@ export default function SignUp() {
       }
 
       if (signUp.status === "complete") {
-        await signUp.finalize();
-        router.replace("/(tabs)");
+        await finalizeAndNavigate(signUp);
         return;
       }
 
@@ -107,8 +120,7 @@ export default function SignUp() {
       }
 
       if (signUp.status === "complete") {
-        await signUp.finalize();
-        router.replace("/(tabs)");
+        await finalizeAndNavigate(signUp);
       } else {
         setErrors({
           code: "Verification incomplete. Please try again.",
@@ -127,6 +139,8 @@ export default function SignUp() {
 
   /* ── resend code ── */
   const handleResend = async () => {
+    if (resending) return;
+    setResending(true);
     setErrors({});
     try {
       const { error } = await signUp.verifications.sendEmailCode();
@@ -139,6 +153,8 @@ export default function SignUp() {
         err?.message ||
         "Could not resend code";
       setErrors({ code: msg });
+    } finally {
+      setResending(false);
     }
   };
 
@@ -216,21 +232,23 @@ export default function SignUp() {
                     </View>
 
                     <Pressable
-                      className="auth-secondary-button"
+                      className={`auth-secondary-button ${resending ? "auth-button-disabled" : ""}`}
                       onPress={handleResend}
+                      disabled={resending || loading}
                     >
                       <Text className="auth-secondary-button-text">
-                        Resend code
+                        {resending ? "Sending…" : "Resend code"}
                       </Text>
                     </Pressable>
 
                     <Pressable
-                      className="auth-secondary-button"
+                      className={`auth-secondary-button ${resending ? "auth-button-disabled" : ""}`}
                       onPress={() => {
                         setPendingVerification(false);
                         setCode("");
                         setErrors({});
                       }}
+                      disabled={resending || loading}
                     >
                       <Text className="auth-secondary-button-text">
                         Use a different email

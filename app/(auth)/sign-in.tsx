@@ -1,5 +1,6 @@
 import { useSignIn } from "@clerk/expo";
 import { Link, useRouter } from "expo-router";
+import { styled } from "nativewind";
 import { useState } from "react";
 import {
   ActivityIndicator,
@@ -14,7 +15,6 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView as RNSafeAreaView } from "react-native-safe-area-context";
-import { styled } from "nativewind";
 
 const SafeAreaView = styled(RNSafeAreaView);
 
@@ -22,10 +22,26 @@ export default function SignIn() {
   const { signIn } = useSignIn();
   const router = useRouter();
 
+  const finalizeAndNavigate = async (si: typeof signIn) => {
+    await si.finalize({
+      navigate: ({ session }) => {
+        const task = session.currentTask?.key;
+        if (task) {
+          router.replace(`/(tabs)`);
+        } else {
+          router.replace("/(tabs)");
+        }
+      },
+    });
+  };
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [needsMfa, setNeedsMfa] = useState(false);
+  const [mfaStrategy, setMfaStrategy] = useState<
+    "phone_code" | "totp" | "backup_code" | null
+  >(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
 
@@ -62,11 +78,27 @@ export default function SignIn() {
       }
 
       if (signIn.status === "complete") {
-        await signIn.finalize();
-        router.replace("/(tabs)");
+        await finalizeAndNavigate(signIn);
       } else if (signIn.status === "needs_second_factor") {
-        await signIn.mfa.sendPhoneCode();
+        const factors = signIn.supportedSecondFactors ?? [];
+        const strategies = factors.map((f) => f.strategy);
+
+        if (strategies.includes("phone_code")) {
+          await signIn.mfa.sendPhoneCode();
+          setMfaStrategy("phone_code");
+        } else if (strategies.includes("totp")) {
+          setMfaStrategy("totp");
+        } else if (strategies.includes("backup_code")) {
+          setMfaStrategy("backup_code");
+        } else {
+          setErrors({ form: "No supported MFA method available." });
+          return;
+        }
         setNeedsMfa(true);
+      } else if (signIn.status === "needs_client_trust") {
+        setErrors({
+          form: "This device is not trusted. Please try from a recognized device or contact support.",
+        });
       } else {
         setErrors({ form: "Unable to sign in. Please try again." });
       }
@@ -90,18 +122,24 @@ export default function SignIn() {
     setErrors({});
 
     try {
-      const { error } = await signIn.mfa.verifyPhoneCode({
-        code: code.trim(),
-      });
+      let verifyResult: { error: any };
+      const trimmedCode = code.trim();
 
-      if (error) {
-        setErrors({ code: error.longMessage || error.message });
+      if (mfaStrategy === "totp") {
+        verifyResult = await signIn.mfa.verifyTOTP({ code: trimmedCode });
+      } else if (mfaStrategy === "backup_code") {
+        verifyResult = await signIn.mfa.verifyBackupCode({ code: trimmedCode });
+      } else {
+        verifyResult = await signIn.mfa.verifyPhoneCode({ code: trimmedCode });
+      }
+
+      if (verifyResult.error) {
+        setErrors({ code: verifyResult.error.longMessage || verifyResult.error.message });
         return;
       }
 
       if (signIn.status === "complete") {
-        await signIn.finalize();
-        router.replace("/(tabs)");
+        await finalizeAndNavigate(signIn);
       } else {
         setErrors({ code: "Verification failed. Try again." });
       }
@@ -143,7 +181,11 @@ export default function SignIn() {
 
                   <Text className="auth-title">Verify your account</Text>
                   <Text className="auth-subtitle">
-                    Enter the verification code sent to your device
+                    {mfaStrategy === "totp"
+                      ? "Enter the code from your authenticator app"
+                      : mfaStrategy === "backup_code"
+                        ? "Enter one of your backup codes"
+                        : "Enter the verification code sent to your phone"}
                   </Text>
                 </View>
 
@@ -151,14 +193,28 @@ export default function SignIn() {
                 <View className="auth-card">
                   <View className="auth-form">
                     <View className="auth-field">
-                      <Text className="auth-label">Verification code</Text>
+                      <Text className="auth-label">
+                        {mfaStrategy === "totp"
+                          ? "Authenticator code"
+                          : mfaStrategy === "backup_code"
+                            ? "Backup code"
+                            : "Verification code"}
+                      </Text>
                       <TextInput
                         className={`auth-input ${errors.code ? "auth-input-error" : ""}`}
-                        placeholder="Enter code"
+                        placeholder={
+                          mfaStrategy === "totp"
+                            ? "Enter authenticator code"
+                            : mfaStrategy === "backup_code"
+                              ? "Enter backup code"
+                              : "Enter code"
+                        }
                         placeholderTextColor="rgba(0,0,0,0.35)"
                         value={code}
                         onChangeText={setCode}
-                        keyboardType="number-pad"
+                        keyboardType={
+                          mfaStrategy === "backup_code" ? "default" : "number-pad"
+                        }
                         autoFocus
                       />
                       {!!errors.code && (
@@ -182,6 +238,7 @@ export default function SignIn() {
                       className="auth-secondary-button"
                       onPress={() => {
                         setNeedsMfa(false);
+                        setMfaStrategy(null);
                         setCode("");
                         setErrors({});
                       }}
